@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ur">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DAFTAR — business data</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect fill='%23e2f35a' width='32' height='32' rx='6'/%3E%3Cpath d='M8 8h16v3H8zm0 6h10v3H8zm0 6h16v3H8z' fill='%231a1612'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <p class="word">DAFTAR</p>
+        <p class="tag">Website, email, phone, social — ek final list</p>
+      </div>
+    </div>
+    <p class="scope">Sirf public pages</p>
+  </header>
+
+  <main>
+    <form id="form" class="panel">
+      <label for="query">Business website, naam, ya links</label>
+      <textarea id="query" name="query" rows="3" required placeholder="https://business.com&#10;ya business ka naam&#10;ya kai links, har line par ek"></textarea>
+      <div class="switches" role="group" aria-label="Kya nikalna hai">
+        <label><input type="checkbox" name="email" checked> Email</label>
+        <label><input type="checkbox" name="phone" checked> Phone</label>
+        <label><input type="checkbox" name="website" checked> Website</label>
+        <label><input type="checkbox" name="social" checked> Social</label>
+      </div>
+      <div class="actions">
+        <button type="submit" id="go">Nikaalo</button>
+        <button type="button" id="stop" hidden>Ruko</button>
+      </div>
+      <p class="fine">Login ke peeche ka data nahi aata. Jo public HTML mein likha hota hai — email, phone, website, social — woh final list mein aata hai.</p>
+      <div class="chips" id="chips">
+        <span>Try</span>
+        <button type="button" data-sample="https://www.fsf.org/about/contact/">fsf.org</button>
+        <button type="button" data-sample="https://wordpress.org/about/">wordpress.org</button>
+      </div>
+    </form>
+
+    <p id="status" class="status" hidden></p>
+    <p id="error" class="error" hidden></p>
+    <section id="sheet" class="sheet" hidden></section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
