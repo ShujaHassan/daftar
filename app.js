@@ -1,6 +1,12 @@
 const form = document.querySelector("#form");
+const directoryForm = document.querySelector("#directory");
 const queryEl = document.querySelector("#query");
+const countryEl = document.querySelector("#country");
+const cityEl = document.querySelector("#city");
+const cityCustomEl = document.querySelector("#city-custom");
+const keywordEl = document.querySelector("#keyword");
 const go = document.querySelector("#go");
+const find = document.querySelector("#find");
 const stop = document.querySelector("#stop");
 const statusEl = document.querySelector("#status");
 const errorEl = document.querySelector("#error");
@@ -8,7 +14,25 @@ const sheet = document.querySelector("#sheet");
 const chips = document.querySelector("#chips");
 
 let current = null;
+fillPlaces();
 renderHistory();
+
+countryEl.addEventListener("change", () => fillCities(countryEl.value));
+cityEl.addEventListener("change", () => {
+  const custom = cityEl.value === "__other";
+  cityCustomEl.hidden = !custom;
+  cityCustomEl.required = custom;
+});
+
+directoryForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const city = cityEl.value === "__other" ? cityCustomEl.value.trim() : cityEl.value;
+  if (!countryEl.value || !city || !keywordEl.value.trim()) {
+    showError("Country, city, aur business type select karo.");
+    return;
+  }
+  startDirectory(countryEl.value, city, keywordEl.value.trim());
+});
 
 chips.addEventListener("click", (event) => {
   const sample = event.target?.dataset?.sample;
@@ -32,7 +56,21 @@ stop.addEventListener("click", () => {
   current?.abort();
 });
 
+async function startDirectory(country, city, keyword) {
+  await streamSearch("/api/directory", { country, city, keyword }, () => `${keyword} · ${city}`);
+}
+
 async function startScrape(query, flags) {
+  await streamSearch("/api/scrape", {
+    query,
+    email: flags.includes("email"),
+    phone: flags.includes("phone"),
+    website: flags.includes("website"),
+    social: flags.includes("social"),
+  }, () => query);
+}
+
+async function streamSearch(url, body, historyName, onDone) {
   current?.abort();
   const controller = new AbortController();
   current = controller;
@@ -40,20 +78,13 @@ async function startScrape(query, flags) {
   sheet.replaceChildren();
   hide(errorEl);
   show(statusEl, "Shuru ho raha hai…");
-  go.disabled = true;
-  stop.hidden = false;
+  setBusy(true);
 
   try {
-    const response = await fetch("/api/scrape", {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        query,
-        email: flags.includes("email"),
-        phone: flags.includes("phone"),
-        website: flags.includes("website"),
-        social: flags.includes("social"),
-      }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
     if (!response.ok || !response.body) {
@@ -78,8 +109,10 @@ async function startScrape(query, flags) {
         if (parsed?.event === "done") {
           finished = true;
           hide(statusEl);
-          renderSheet(parsed.data);
-          remember(query, parsed.data.business?.name || query);
+          if (parsed.data.kind === "directory") renderDirectory(parsed.data);
+          else if (onDone) onDone(parsed.data);
+          else renderSheet(parsed.data);
+          remember(historyName(), parsed.data.business?.name || parsed.data.keyword || historyName(), parsed.data.kind === "directory" ? "directory" : "page");
         }
         splitAt = buffer.indexOf("\n\n");
       }
@@ -89,10 +122,34 @@ async function startScrape(query, flags) {
     if (error?.name !== "AbortError") showError("Connection ruk gaya.");
     else show(statusEl, "Ruk gaya.");
   } finally {
-    go.disabled = false;
-    stop.hidden = true;
+    setBusy(false);
     if (current === controller) current = null;
   }
+}
+
+function setBusy(busy) {
+  go.disabled = busy;
+  find.disabled = busy;
+  stop.hidden = !busy;
+}
+
+function fillPlaces() {
+  countryEl.replaceChildren();
+  for (const [country] of PLACES) {
+    countryEl.append(new Option(country, country));
+  }
+  fillCities(countryEl.value);
+}
+
+function fillCities(country) {
+  const match = PLACES.find((row) => row[0] === country);
+  const cities = match ? match[1] : [];
+  cityEl.replaceChildren();
+  for (const city of cities) cityEl.append(new Option(city, city));
+  cityEl.append(new Option("Koi aur city", "__other"));
+  cityCustomEl.hidden = true;
+  cityCustomEl.required = false;
+  cityCustomEl.value = "";
 }
 
 function parseEvent(raw) {
@@ -108,6 +165,148 @@ function parseEvent(raw) {
   } catch {
     return null;
   }
+}
+
+function renderDirectory(result) {
+  sheet.hidden = false;
+  sheet.replaceChildren();
+  const top = el("div", { class: "sheet-top" });
+  const heading = el("div");
+  heading.append(
+    el("p", { class: "kicker", text: "FINAL DATA" }),
+    el("h1", { text: `${result.keyword} · ${result.city}` }),
+    el("p", { class: "address", text: result.area || `${result.city}, ${result.country}` })
+  );
+  top.append(heading, el("div", { class: "stamp", text: "LIST" }));
+  sheet.append(top);
+
+  const counts = el("div", { class: "summary" });
+  counts.append(el("span", { text: `${result.count} businesses` }));
+  const phones = result.businesses.filter((row) => row.phone || row.phones?.length).length;
+  const emails = result.businesses.filter((row) => row.email || row.emails?.length).length;
+  const socials = result.businesses.filter((row) => row.social?.length).length;
+  const sites = result.businesses.filter((row) => row.website).length;
+  counts.append(
+    el("span", { text: `${phones} phones` }),
+    el("span", { text: `${emails} emails` }),
+    el("span", { text: `${socials} social` }),
+    el("span", { text: `${sites} websites` })
+  );
+  sheet.append(counts);
+
+  const list = el("div", { class: "biz-list" });
+  if (!result.businesses.length) list.append(empty("Is search par koi public business nahi mila."));
+  for (const row of result.businesses) list.append(businessCard(row));
+  sheet.append(list);
+
+  if (result.notes?.length) {
+    const notes = el("div", { class: "notes" });
+    for (const note of result.notes) notes.append(el("p", { class: "note", text: note }));
+    sheet.append(notes);
+  }
+  const tools = el("div", { class: "tools" });
+  tools.append(
+    actionButton("Copy JSON", () => copyText(JSON.stringify(result, null, 2))),
+    actionButton("Download CSV", () => downloadDirectoryCsv(result)),
+    actionButton("Print", () => window.print())
+  );
+  sheet.append(tools);
+  sheet.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function businessCard(row) {
+  const card = el("article", { class: "biz-card" });
+  card.append(el("h3", { text: row.name }));
+  if (row.category) card.append(el("p", { class: "meta", text: row.category }));
+  const fields = [
+    ["ADDRESS", row.address],
+    ["HOURS", row.hours],
+  ];
+  const dl = document.createElement("dl");
+  for (const [label, value] of fields) {
+    if (!value) continue;
+    dl.append(el("dt", { text: label }), el("dd", { text: value }));
+  }
+  const phones = uniqueValues(row.phones?.length ? row.phones : [row.phone]);
+  if (phones.length) {
+    dl.append(el("dt", { text: phones.length > 1 ? "PHONES" : "PHONE" }));
+    const dd = el("dd", { class: "stack" });
+    for (const phone of phones) {
+      const dial = phone.replace(/[^\d+]/g, "");
+      dd.append(el("a", { href: `tel:${dial}`, text: phone }));
+    }
+    dl.append(dd);
+  }
+  const emails = uniqueValues(row.emails?.length ? row.emails : [row.email]);
+  if (emails.length) {
+    dl.append(el("dt", { text: emails.length > 1 ? "EMAILS" : "EMAIL" }));
+    const dd = el("dd", { class: "stack" });
+    for (const email of emails) dd.append(el("a", { href: `mailto:${email}`, text: email }));
+    dl.append(dd);
+  }
+  const socials = Array.isArray(row.social) ? row.social : [];
+  if (socials.length) {
+    dl.append(el("dt", { text: "SOCIAL" }));
+    const dd = el("dd", { class: "social-links" });
+    for (const item of socials) {
+      const href = safeHttp(item.url);
+      if (!href) continue;
+      dd.append(el("a", { href, text: item.platform || "Social", target: "_blank", rel: "noreferrer" }));
+    }
+    dl.append(dd);
+  }
+  const site = safeHttp(row.website);
+  if (site) {
+    dl.append(el("dt", { text: "WEBSITE" }));
+    const dd = el("dd");
+    dd.append(el("a", { href: site, text: site, target: "_blank", rel: "noreferrer" }));
+    dl.append(dd);
+  }
+  const map = safeHttp(row.maps);
+  if (map) {
+    dl.append(el("dt", { text: "MAP" }));
+    const dd = el("dd");
+    dd.append(el("a", { href: map, text: "Open map", target: "_blank", rel: "noreferrer" }));
+    dl.append(dd);
+  }
+  if (dl.childNodes.length) card.append(dl);
+  if (row.about) card.append(el("p", { class: "meta", text: row.about }));
+  if (site) {
+    const more = actionButton("Is website ki poori detail", () => startScrape(site, ["email", "phone", "website", "social"]));
+    more.classList.add("copy");
+    card.append(more);
+  }
+  return card;
+}
+
+function uniqueValues(list) {
+  const seen = new Set();
+  const out = [];
+  for (const item of list || []) {
+    const text = String(item || "").trim();
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out;
+}
+
+function downloadDirectoryCsv(result) {
+  const lines = [["name", "category", "address", "phones", "emails", "social", "website", "hours", "map"]];
+  for (const row of result.businesses) {
+    const phones = uniqueValues(row.phones?.length ? row.phones : [row.phone]).join(" | ");
+    const emails = uniqueValues(row.emails?.length ? row.emails : [row.email]).join(" | ");
+    const social = (row.social || []).map((item) => `${item.platform}: ${item.url}`).join(" | ");
+    lines.push([row.name, row.category, row.address, phones, emails, social, row.website, row.hours, row.maps]);
+  }
+  const csv = lines.map((row) => row.map(csvCell).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${result.city}-${result.keyword}`.replace(/[^\w.-]+/g, "-").slice(0, 50) + ".csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 function renderSheet(dossier) {
@@ -303,10 +502,10 @@ async function copyText(text) {
   }
 }
 
-function remember(query, name) {
+function remember(query, name, mode) {
   const key = "daftar-history";
   const prev = JSON.parse(localStorage.getItem(key) || "[]");
-  const next = [{ query, name, at: Date.now() }, ...prev.filter((item) => item.query !== query)].slice(0, 8);
+  const next = [{ query, name, mode: mode || "page", at: Date.now() }, ...prev.filter((item) => item.query !== query)].slice(0, 8);
   localStorage.setItem(key, JSON.stringify(next));
   renderHistory();
 }
@@ -320,6 +519,14 @@ function renderHistory() {
   for (const item of items) {
     const button = el("button", { type: "button", text: item.name || item.query });
     button.addEventListener("click", () => {
+      if (item.mode === "directory") {
+        const [keyword, city] = String(item.query).split(" · ");
+        if (keyword) keywordEl.value = keyword;
+        const option = [...cityEl.options].find((entry) => entry.value.toLowerCase() === String(city || "").toLowerCase());
+        if (option) cityEl.value = option.value;
+        directoryForm.requestSubmit();
+        return;
+      }
       queryEl.value = item.query;
       form.requestSubmit();
     });
