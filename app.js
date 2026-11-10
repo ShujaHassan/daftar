@@ -16,6 +16,7 @@ const chips = document.querySelector("#chips");
 let current = null;
 fillPlaces();
 renderHistory();
+if (!usesLocalServer()) form.hidden = true;
 
 countryEl.addEventListener("change", () => fillCities(countryEl.value));
 cityEl.addEventListener("change", () => {
@@ -57,10 +58,44 @@ stop.addEventListener("click", () => {
 });
 
 async function startDirectory(country, city, keyword) {
-  await streamSearch("/api/directory", { country, city, keyword }, () => `${keyword} · ${city}`);
+  if (usesLocalServer()) {
+    await streamSearch("/api/directory", { country, city, keyword }, () => `${keyword} · ${city}`);
+    return;
+  }
+  current?.abort();
+  const controller = new AbortController();
+  current = controller;
+  sheet.hidden = true;
+  sheet.replaceChildren();
+  hide(errorEl);
+  show(statusEl, "Shuru ho raha hai…");
+  setBusy(true);
+  try {
+    const result = await searchPlaces(
+      { country, city, keyword },
+      { signal: controller.signal, onEvent: (event) => show(statusEl, event.message || "") }
+    );
+    hide(statusEl);
+    renderDirectory(result);
+    remember(`${keyword} · ${city}`, keyword, "directory");
+  } catch (error) {
+    if (error?.name === "AbortError") show(statusEl, "Ruk gaya.");
+    else showError(error?.message || "Search fail ho gayi.");
+  } finally {
+    setBusy(false);
+    if (current === controller) current = null;
+  }
+}
+
+function usesLocalServer() {
+  return location.hostname === "localhost" || location.hostname === "127.0.0.1";
 }
 
 async function startScrape(query, flags) {
+  if (!usesLocalServer()) {
+    showError("Is live page par country, city, aur business search chalti hai.");
+    return;
+  }
   await streamSearch("/api/scrape", {
     query,
     email: flags.includes("email"),
