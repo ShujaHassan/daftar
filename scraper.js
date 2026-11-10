@@ -1128,7 +1128,11 @@ function socialStatus(page, extract) {
 }
 
 async function searchWeb(name, signal, cache) {
-  const q = encodeURIComponent(`${name} official website`);
+  return findPublicPages(`${name} official website`, signal, cache);
+}
+
+export async function findPublicPages(query, signal, cache = new Map(), timeoutMs = 15000) {
+  const q = encodeURIComponent(query);
   const attempts = [
     `https://html.duckduckgo.com/html/?q=${q}`,
     `https://lite.duckduckgo.com/lite/?q=${q}`,
@@ -1137,7 +1141,7 @@ async function searchWeb(name, signal, cache) {
   for (const url of attempts) {
     throwIfAborted(signal);
     try {
-      const page = await fetchText(url, signal, cache);
+      const page = await fetchText(url, signal, cache, timeoutMs);
       found.push(...extractSearchLinks(page.html));
       if (found.length) break;
     } catch {

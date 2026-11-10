@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDossier } from "./scraper.js";
+import { searchDirectory } from "./directory.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -20,6 +21,10 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${host}`);
   if (req.method === "POST" && url.pathname === "/api/scrape") {
     await handleScrape(req, res);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/directory") {
+    await handleDirectory(req, res);
     return;
   }
   if (req.method !== "GET" && req.method !== "HEAD") {
@@ -48,56 +53,88 @@ const server = http.createServer(async (req, res) => {
 });
 
 async function handleScrape(req, res) {
-  let body = "";
-  try {
-    body = await readReq(req);
-  } catch {
-    send(res, 400, "Request parhi nahi gayi.");
-    return;
-  }
-  let payload;
-  try {
-    payload = JSON.parse(body || "{}");
-  } catch {
-    send(res, 400, "JSON theek nahi hai.");
-    return;
-  }
-
-  res.writeHead(200, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-cache, no-transform",
-    connection: "keep-alive",
-  });
-
-  const controller = new AbortController();
-  let finished = false;
-  res.on("close", () => {
-    if (!finished) controller.abort();
-  });
-
-  const sendEvent = (event, data) => {
-    if (finished) return;
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  };
-
+  const payload = await readJson(req, res);
+  if (!payload) return;
+  const events = openEvents(req, res);
   try {
     const dossier = await buildDossier(payload.query, {
       email: payload.email !== false,
       phone: payload.phone !== false,
       website: payload.website !== false,
       social: payload.social !== false,
-      signal: controller.signal,
-      onEvent: (event) => sendEvent("status", event),
+      signal: events.controller.signal,
+      onEvent: (event) => events.send("status", event),
     });
-    sendEvent("done", dossier);
+    events.send("done", dossier);
   } catch (error) {
     if (error?.name !== "AbortError") {
-      sendEvent("error", { message: error?.message || "Scrape fail ho gaya." });
+      events.send("error", { message: error?.message || "Scrape fail ho gaya." });
     }
   } finally {
-    finished = true;
-    res.end();
+    events.finish();
   }
+}
+
+async function handleDirectory(req, res) {
+  const payload = await readJson(req, res);
+  if (!payload) return;
+  const events = openEvents(req, res);
+  try {
+    const result = await searchDirectory(
+      { country: payload.country, city: payload.city, keyword: payload.keyword },
+      {
+        signal: events.controller.signal,
+        onEvent: (event) => events.send("status", event),
+      }
+    );
+    events.send("done", result);
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      events.send("error", { message: error?.message || "Search fail ho gayi." });
+    }
+  } finally {
+    events.finish();
+  }
+}
+
+async function readJson(req, res) {
+  let body = "";
+  try {
+    body = await readReq(req);
+  } catch {
+    send(res, 400, "Request parhi nahi gayi.");
+    return null;
+  }
+  try {
+    return JSON.parse(body || "{}");
+  } catch {
+    send(res, 400, "JSON theek nahi hai.");
+    return null;
+  }
+}
+
+function openEvents(req, res) {
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+  });
+  const controller = new AbortController();
+  let finished = false;
+  res.on("close", () => {
+    if (!finished) controller.abort();
+  });
+  return {
+    controller,
+    send(event, data) {
+      if (finished) return;
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    },
+    finish() {
+      finished = true;
+      res.end();
+    },
+  };
 }
 
 function readReq(req) {
