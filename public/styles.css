@@ -136,6 +136,8 @@ select:focus,
 }
 
 .biz-card dd { margin: 0; overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+
 .biz-card a { color: #3d4a12; }
 .biz-card .stack, .biz-card .social-links { display: flex; flex-wrap: wrap; gap: 8px 14px; }
 .biz-card .social-links a {
